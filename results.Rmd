@@ -1,0 +1,108 @@
+---
+title: "Results"
+author: "Dimuthu Ratnadiwakara"
+date: "2024-08-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+rm(list=ls())
+library(data.table)
+library(RSQLite)
+library(DBI)
+library(dplyr)
+library(lfe)
+library(stargazer)
+library(ggplot2)
+library(readxl)
+
+source('https://raw.githubusercontent.com/dratnadiwakara/r-functions/main/functions.R')
+
+data_path <- 'D:/OneDrive/research-data/'
+```
+
+
+
+```{r}
+hmda_link_2021 <- readRDS(paste0(processed_data_path,"hmda_link_2021.rds"))
+```
+
+```{r}
+gse_limits <- readRDS(paste0(processed_data_path,"gse_limits.rds"))
+gse_limits_yr <- gse_limits[,.(
+  gse_limit=median(gse_limit,na.rm=T),
+  limit_change=median(limit_change,na.rm=T)),
+  by=year]
+
+setnames(gse_limits_yr,"gse_limit","gse_limit_year")
+```
+
+
+```{r}
+data <- gse_limits[year %in% c(2016:2023),.(.N),by=.(gse_limit,year)]
+
+years <- unique(data$year)
+
+# Initialize an empty list to store the data.tables
+data_tables_list <- list()
+
+# Loop through each year, filter the data, and store in the list
+for (yr in years) {
+  # Filter data for the current year
+  dt_year <- data[year == yr, .(gse_limit, N)]
+  
+  # Add an 'id' column that is simply the row number
+  # Rearrange columns to have 'id' as the first column
+  
+  setorder(dt_year,gse_limit)
+  
+  other <- dt_year[N==1]
+  dt_year <- dt_year[N>1]
+  new_row <- setNames(as.list(rep(NA, ncol(dt_year))), names(dt_year))
+  new_row[["gse_limit"]] <- -1
+  new_row[["N"]] <- nrow(other)
+
+# Convert the list to a data.table and append
+  dt_year <- rbind(dt_year, as.data.table((new_row)))
+  dt_year[, id := .I]
+  
+  setnames(dt_year, "gse_limit", paste0("gse_limit_", yr))
+  setnames(dt_year, "N", paste0("N_", yr))
+  
+  
+  # Add the data.table to the list, with the name being the year
+  data_tables_list[[as.character(yr)]] <- dt_year
+}
+
+merged_data <- Reduce(function(x, y) merge(x, y, by = "id", all = TRUE), data_tables_list)
+
+print(merged_data)
+```
+
+
+```{r}
+stargazer(merged_data,summary = F,type="text")
+```
+
+```{r}
+ggplot(gse_limits_yr, aes(x=year)) +
+  geom_col(aes(y=gse_limit_year),fill="dodgerblue",alpha=0.5) +
+  scale_x_continuous(breaks = unique(gse_limits_yr$year))+
+  labs(x="",y="GSE limit ($'000)")+
+  theme_minimal()
+```
+
+```{r}
+ggplot(gse_limits_yr, aes(x=year, y=limit_change)) +
+  geom_col(filll="dodgerblue",size=2) +
+  # geom_point(size=3,color="dodgerblue4")+
+  scale_x_continuous(breaks = unique(gse_limits_yr$year))+
+  labs(x="",y="GSE limit Change ($'000)")+
+  theme_minimal()
+```
+
